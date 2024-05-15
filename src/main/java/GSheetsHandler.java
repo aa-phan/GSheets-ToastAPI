@@ -1,61 +1,69 @@
+import com.google.api.client.auth.oauth2.Credential;
+import com.google.api.client.auth.oauth2.GoogleAuthorizationCodeFlow;
+import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver;
+import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.json.JsonFactory;
+import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
 import com.google.api.services.sheets.v4.model.ValueRange;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.auth.oauth2.ServiceAccountCredentials;
-import com.google.auth.http.HttpCredentialsAdapter;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.json.jackson2.JacksonFactory;
-import com.google.gson.JsonArray;
 
-import java.io.FileInputStream;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
 
-public class GSheetsHandler {
+public class GoogleSheetsHandler {
 
-    private static final String APPLICATION_NAME = "Toast to Google Sheets";
-    private static final String SPREADSHEET_ID = "May-1 to May-15";
-    private static final String SHEET_NAME = "Sheet1";
+    private static final String APPLICATION_NAME = "Google Sheets API Java";
+    private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
+    private static final String TOKENS_DIRECTORY_PATH = "tokens";
+    private static final String CREDENTIALS_FILE_PATH = "/path/to/client_secret.json";
+
     private Sheets sheetsService;
-    private ToastHandler toastHandler;
 
-    public GSheetsHandler() throws GeneralSecurityException, IOException {
+    public GoogleSheetsHandler() throws GeneralSecurityException, IOException {
         sheetsService = getSheetsService();
-        toastHandler = new ToastHandler();
     }
 
     private Sheets getSheetsService() throws GeneralSecurityException, IOException {
-        FileInputStream serviceAccountStream = new FileInputStream("path/to/credentials.json");
-        GoogleCredentials credentials = ServiceAccountCredentials.fromStream(serviceAccountStream)
-                .createScoped(Collections.singleton(SheetsScopes.SPREADSHEETS));
-        return new Sheets.Builder(GoogleNetHttpTransport.newTrustedTransport(), JacksonFactory.getDefaultInstance(), new HttpCredentialsAdapter(credentials))
+        GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new FileReader(CREDENTIALS_FILE_PATH));
+
+        GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
+                GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, clientSecrets, Collections.singletonList(SheetsScopes.SPREADSHEETS))
+                .setDataStoreFactory(new FileDataStoreFactory(new File(TOKENS_DIRECTORY_PATH)))
+                .setAccessType("offline")
+                .build();
+
+        LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort(8888).build();
+        Credential credential = new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
+
+        return new Sheets.Builder(GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, credential)
                 .setApplicationName(APPLICATION_NAME)
                 .build();
     }
 
-    public void updateGoogleSheetWithShifts(String startDate, String endDate) throws IOException, InterruptedException {
-        JsonArray shifts = toastHandler.fetchShifts(startDate, endDate);
-
-        // Process and combine data
-        // Example: Update Google Sheets with shifts data
-
-        ValueRange body = new ValueRange()
-                .setValues(List.of(
-                        List.of("Employee Name", "Hours Worked", "Tips Earned")
-                        // Add more rows here
-                ));
-
-        sheetsService.spreadsheets().values()
-                .update(SPREADSHEET_ID, SHEET_NAME + "!A1", body)
+    public void updateGoogleSheet(String spreadsheetId, String range, List<List<Object>> values) throws IOException {
+        ValueRange body = new ValueRange().setValues(values);
+        sheetsService.spreadsheets().values().update(spreadsheetId, range, body)
                 .setValueInputOption("RAW")
                 .execute();
     }
 
-    public static void main(String[] args) throws GeneralSecurityException, IOException, InterruptedException {
-        GSheetsHandler gSheetsHandler = new GSheetsHandler();
-        gSheetsHandler.updateGoogleSheetWithShifts("2023-05-13", "2023-05-13");
+    public static void main(String[] args) throws GeneralSecurityException, IOException {
+        GoogleSheetsHandler handler = new GoogleSheetsHandler();
+        // Replace with your spreadsheet ID and range
+        String spreadsheetId = "your_spreadsheet_id";
+        String range = "Sheet1!A1";
+        List<List<Object>> values = List.of(
+                List.of("Employee Name", "Hours Worked", "Tips Earned"),
+                List.of("John Doe", "8", "100"),
+                List.of("Jane Doe", "7", "120")
+        );
+        handler.updateGoogleSheet(spreadsheetId, range, values);
     }
 }
